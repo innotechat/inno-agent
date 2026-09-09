@@ -26,6 +26,16 @@ def test_browser_observation_contains_metadata():
     assert "Create post" in result
 
 
+def test_browser_dict_extracts_document_only():
+    result = govern_tool_result(
+        "browser",
+        {"document": "Create post", "screenshot": "large-reference", "metadata": "keep-out"},
+    )
+    assert result == "Create post"
+    assert "screenshot" not in result
+    assert "metadata" not in result
+
+
 def test_non_browser_tool_is_not_modified():
     value = "x" * 1000
     assert govern_tool_result("shell", value) == value
