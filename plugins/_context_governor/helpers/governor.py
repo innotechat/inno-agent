@@ -46,7 +46,6 @@ def _browser_document(result: Any) -> str:
         document = result.get("document")
         if document is not None:
             return str(document)
-        # Some browser actions return nested result/document payloads.
         nested = result.get("result")
         if isinstance(nested, dict) and nested.get("document") is not None:
             return str(nested["document"])
