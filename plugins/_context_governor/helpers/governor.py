@@ -24,22 +24,33 @@ def _clean_text(value: Any) -> str:
 
 
 def compact_document(document: Any, config: GovernorConfig = DEFAULT_CONFIG) -> str:
-    """Bound a browser document without changing small observations."""
+    """Bound a browser document while preserving useful head/tail context."""
     text = str(document or "").strip()
     if not text:
         return ""
     if len(text) <= config.max_chars:
         return text
 
-    # Preserve both the beginning (page identity/navigation) and tail
-    # (often status/confirmation text) while making the truncation explicit.
     head = max(config.max_chars * 2 // 3, 1)
     tail = max(config.max_chars - head, 1)
     return (
         text[:head]
-        + "\n...[context governor: document truncated; full artifact remains available]...\n"
+        + "\n...[context governor: document truncated; retrieve full content explicitly]...\n"
         + text[-tail:]
     )
+
+
+def _browser_document(result: Any) -> str:
+    """Extract browser document text without stringifying the whole response object."""
+    if isinstance(result, dict):
+        document = result.get("document")
+        if document is not None:
+            return str(document)
+        # Some browser actions return nested result/document payloads.
+        nested = result.get("result")
+        if isinstance(nested, dict) and nested.get("document") is not None:
+            return str(nested["document"])
+    return str(result or "")
 
 
 def browser_observation(
@@ -67,8 +78,7 @@ def govern_tool_result(
     result: Any,
     config: GovernorConfig = DEFAULT_CONFIG,
 ) -> str:
-    """Bound only browser content-like results; leave other tools untouched."""
-    text = str(result or "")
+    """Bound browser observations; leave non-browser tool results untouched."""
     if tool_name.lower() not in {"browser", "web_browser"}:
-        return text
-    return compact_document(text, config)
+        return str(result or "")
+    return compact_document(_browser_document(result), config)
