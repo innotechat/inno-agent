@@ -23,3 +23,6 @@ jobs:
 
       - name: Run Context Governor tests
         run: python -m pytest plugins/_context_governor/tests/test_governor.py -q
+
+      - name: Run synthetic token benchmark
+        run: python scripts/benchmark_context_governor.py
