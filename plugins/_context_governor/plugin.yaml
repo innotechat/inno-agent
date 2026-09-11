@@ -1,0 +1,5 @@
+name: _context_governor
+title: Context Governor
+description: Token-efficient observation compaction and explicit browser artifact retrieval.
+version: 1.0.0
+always_enabled: true
