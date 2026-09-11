@@ -142,6 +142,10 @@ def govern_tool_result(tool_name: str, result: Any, config: GovernorConfig = DEF
     """Bound browser observations; leave non-browser tool results untouched."""
     if tool_name.lower() not in {"browser", "web_browser"}:
         return str(result or "")
+    if isinstance(result, str) and result.startswith("BROWSER_OBSERVATION\n"):
+        # Idempotent: Browser._format_result() has already governed this result.
+        # Re-compacting here could truncate the artifact reference or metadata.
+        return result
     if isinstance(result, dict) and "document" in result:
         return format_browser_result("observation", result, config)
     return compact_document(_browser_document(result), config)
