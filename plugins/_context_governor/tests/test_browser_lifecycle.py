@@ -13,6 +13,7 @@ from plugins._context_governor.tools.browser_artifact import BrowserArtifact
 
 class _FakeLog:
     def __init__(self):
+        self.id = "test-log"
         self.updated = None
 
     def update(self, content: str):
