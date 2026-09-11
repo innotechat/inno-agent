@@ -12,6 +12,7 @@ from helpers.print_style import PrintStyle
 from helpers.tool import Response, Tool
 from plugins._browser.helpers.config import activate_browser_model
 from plugins._browser.helpers.selector import get_tool_runtime
+from plugins._context_governor.helpers.governor import format_browser_result
 
 
 HISTORY_SCREENSHOT_QUALITY = 62
@@ -563,9 +564,4 @@ class Browser(Tool):
 
     @staticmethod
     def _format_result(action: str, result: Any) -> str:
-        if action == "content" and isinstance(result, dict):
-            if set(result.keys()) == {"document"}:
-                return str(result.get("document") or "")
-            return json.dumps(result, indent=2, ensure_ascii=False)
-
-        return json.dumps(result, indent=2, ensure_ascii=False, default=str)
+        return format_browser_result(action, result)
