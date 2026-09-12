@@ -55,24 +55,41 @@ class ContextBudgetGovernor:
         limit = max(int(token_budget), 1)
         if self.approximate_tokens(text) <= limit:
             return text
+
         max_chars = max(int(limit * self.config.chars_per_token), 1)
-        head = max(max_chars * 2 // 3, 1)
-        tail = max(max_chars - head, 1)
-        marker = "\n...[context budget: truncated; full artifact remains recoverable]...\n"
-        return text[:head] + marker + text[-tail:]
+        marker = "\n...[context truncated; artifact recoverable]...\n"
+        marker_chars = len(marker)
+        if max_chars <= marker_chars + 2:
+            return text[:max_chars]
+
+        payload_chars = max_chars - marker_chars
+        head = max(payload_chars * 2 // 3, 1)
+        tail = max(payload_chars - head, 1)
+        result = text[:head] + marker + text[-tail:]
+
+        # Keep the final estimate strictly within the requested budget.
+        while self.approximate_tokens(result) > limit and result:
+            result = result[:-1]
+        return result
 
     def govern(self, text: Any, *, priority: str = "normal", key: str = "") -> str:
         """Apply observation, tool-result, and remaining per-turn budgets deterministically."""
-        value = re.sub(r"\s+", " ", str(text or "")).strip()
+        raw = str(text or "")
+        if not raw.strip():
+            return ""
+
+        # Preserve structured observation line boundaries while removing noisy spacing.
+        value = "\n".join(re.sub(r"[ \t]+", " ", line).strip() for line in raw.splitlines()).strip()
         if not value:
             return ""
 
         fingerprint = hashlib.sha256(value.encode("utf-8")).hexdigest()
-        if key and fingerprint in self._seen:
+        seen_key = f"{key}\0{fingerprint}" if key else fingerprint
+        if key and seen_key in self._seen:
             self.metrics.duplicates_suppressed += 1
             return ""
         if key:
-            self._seen.add(fingerprint)
+            self._seen.add(seen_key)
 
         self.metrics.raw_tokens += self.approximate_tokens(value)
         self.metrics.observations += 1
@@ -96,6 +113,15 @@ class ContextBudgetGovernor:
 
     def note_artifact_retrieval(self) -> None:
         self.metrics.artifact_retrievals += 1
+
+
+def get_agent_governor(agent: Any) -> ContextBudgetGovernor:
+    """Return an agent-scoped governor without changing the core agent model."""
+    governor = getattr(agent, "_context_budget_governor", None)
+    if not isinstance(governor, ContextBudgetGovernor):
+        governor = ContextBudgetGovernor()
+        setattr(agent, "_context_budget_governor", governor)
+    return governor
 
 
 def budget_observation(text: Any, budget: int = 2500) -> str:
