@@ -23,10 +23,11 @@ class BrowserSnapshot:
 
 
 class BrowserStateStore:
-    """Bounded process-local browser state index for change detection and retrieval."""
+    """Bounded process-local browser state index with TTL and safe session lifecycle."""
 
-    def __init__(self, *, max_snapshots: int = 256):
+    def __init__(self, *, max_snapshots: int = 256, ttl_seconds: int = 900):
         self.max_snapshots = max(int(max_snapshots), 1)
+        self.ttl_seconds = max(int(ttl_seconds), 1)
         self._sessions: dict[str, str] = {}
         self._latest: dict[str, BrowserSnapshot] = {}
         self._snapshots: dict[str, BrowserSnapshot] = {}
@@ -54,7 +55,26 @@ class BrowserStateStore:
             parts.append("removed:\n" + "\n".join(f"- {line}" for line in removed))
         return "\n".join(parts) or "unchanged"
 
-    def snapshot(self, *, browser_id: object, url: str, title: str, content: str, artifact_ref: str = "") -> BrowserSnapshot:
+    def _purge_expired(self) -> None:
+        cutoff = time.time() - self.ttl_seconds
+        expired = [oid for oid, snapshot in self._snapshots.items() if snapshot.created_at < cutoff]
+        for observation_id in expired:
+            self._snapshots.pop(observation_id, None)
+        for key, snapshot in list(self._latest.items()):
+            if snapshot.created_at < cutoff or snapshot.observation_id not in self._snapshots:
+                self._latest.pop(key, None)
+                self._sessions.pop(key, None)
+
+    def snapshot(
+        self,
+        *,
+        browser_id: object,
+        url: str,
+        title: str,
+        content: str,
+        artifact_ref: str = "",
+    ) -> BrowserSnapshot:
+        self._purge_expired()
         key = self._key(browser_id)
         session_id = self._sessions.setdefault(key, f"bsess_{secrets.token_urlsafe(9)}")
         previous = self._latest.get(key)
@@ -63,22 +83,50 @@ class BrowserStateStore:
         sequence = previous.sequence + 1 if previous else 1
         observation_id = f"bobs_{secrets.token_urlsafe(10)}"
         diff = self._diff(previous.content, content) if previous else "initial"
-        snapshot = BrowserSnapshot(session_id, observation_id, key, url, title, artifact_ref, sequence, changed, diff, time.time(), current_fp, content)
+        snapshot = BrowserSnapshot(
+            session_id,
+            observation_id,
+            key,
+            url,
+            title,
+            artifact_ref,
+            sequence,
+            changed,
+            diff,
+            time.time(),
+            current_fp,
+            content,
+        )
         self._latest[key] = snapshot
         self._snapshots[observation_id] = snapshot
         while len(self._snapshots) > self.max_snapshots:
-            oldest = next(iter(self._snapshots))
-            self._snapshots.pop(oldest, None)
+            oldest_id = next(iter(self._snapshots))
+            self._snapshots.pop(oldest_id, None)
+            for latest_key, latest_snapshot in list(self._latest.items()):
+                if latest_snapshot.observation_id == oldest_id:
+                    self._latest.pop(latest_key, None)
+                    self._sessions.pop(latest_key, None)
         return snapshot
 
     def get(self, observation_id: str) -> BrowserSnapshot:
+        self._purge_expired()
         snapshot = self._snapshots.get(str(observation_id or "").strip())
         if snapshot is None:
             raise KeyError("unknown or expired browser observation reference")
         return snapshot
 
     def latest(self, browser_id: object) -> BrowserSnapshot | None:
+        self._purge_expired()
         return self._latest.get(self._key(browser_id))
+
+    def close(self, browser_id: object) -> None:
+        """Invalidate browser state when its runtime session is closed."""
+        self._purge_expired()
+        key = self._key(browser_id)
+        snapshot = self._latest.pop(key, None)
+        self._sessions.pop(key, None)
+        if snapshot:
+            self._snapshots.pop(snapshot.observation_id, None)
 
     def clear(self) -> None:
         self._sessions.clear()
