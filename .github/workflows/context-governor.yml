@@ -26,3 +26,6 @@ jobs:
 
       - name: Run synthetic token benchmark
         run: python scripts/benchmark_context_governor.py
+
+      - name: Run realistic browser observation benchmark
+        run: python scripts/benchmark_browser_observations.py
