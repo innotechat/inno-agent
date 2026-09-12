@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass
 
 
-@dataclass(frozen=True)
+@dataclass
 class BrowserSnapshot:
     session_id: str
     observation_id: str
@@ -18,10 +18,12 @@ class BrowserSnapshot:
     changed: bool
     diff: str
     created_at: float
+    fingerprint: str
+    content: str = ""
 
 
 class BrowserStateStore:
-    """Bounded process-local browser state index for cheap change detection and retrieval."""
+    """Bounded process-local browser state index for change detection and retrieval."""
 
     def __init__(self, *, max_snapshots: int = 256):
         self.max_snapshots = max(int(max_snapshots), 1)
@@ -52,32 +54,16 @@ class BrowserStateStore:
             parts.append("removed:\n" + "\n".join(f"- {line}" for line in removed))
         return "\n".join(parts) or "unchanged"
 
-    def snapshot(
-        self,
-        *,
-        browser_id: object,
-        url: str,
-        title: str,
-        content: str,
-        artifact_ref: str = "",
-    ) -> BrowserSnapshot:
+    def snapshot(self, *, browser_id: object, url: str, title: str, content: str, artifact_ref: str = "") -> BrowserSnapshot:
         key = self._key(browser_id)
         session_id = self._sessions.setdefault(key, f"bsess_{secrets.token_urlsafe(9)}")
         previous = self._latest.get(key)
-        changed = previous is None or self._fingerprint(url, title, content) != self._fingerprint(previous.url, previous.title, previous.diff if previous.diff != "unchanged" else "")
-        # Compare against the last retained content fingerprint instead of exposing content in the snapshot.
         current_fp = self._fingerprint(url, title, content)
-        previous_fp = getattr(previous, "_fingerprint", None)
-        if previous is None:
-            changed = True
-        else:
-            changed = current_fp != previous_fp
-        sequence = (previous.sequence + 1) if previous else 1
+        changed = previous is None or current_fp != previous.fingerprint
+        sequence = previous.sequence + 1 if previous else 1
         observation_id = f"bobs_{secrets.token_urlsafe(10)}"
-        diff = self._diff(getattr(previous, "_content", "") if previous else "", content) if previous else "initial"
-        snapshot = BrowserSnapshot(session_id, observation_id, key, url, title, artifact_ref, sequence, changed, diff, time.time())
-        object.__setattr__(snapshot, "_fingerprint", current_fp)
-        object.__setattr__(snapshot, "_content", content)
+        diff = self._diff(previous.content, content) if previous else "initial"
+        snapshot = BrowserSnapshot(session_id, observation_id, key, url, title, artifact_ref, sequence, changed, diff, time.time(), current_fp, content)
         self._latest[key] = snapshot
         self._snapshots[observation_id] = snapshot
         while len(self._snapshots) > self.max_snapshots:
@@ -86,8 +72,7 @@ class BrowserStateStore:
         return snapshot
 
     def get(self, observation_id: str) -> BrowserSnapshot:
-        key = str(observation_id or "").strip()
-        snapshot = self._snapshots.get(key)
+        snapshot = self._snapshots.get(str(observation_id or "").strip())
         if snapshot is None:
             raise KeyError("unknown or expired browser observation reference")
         return snapshot
