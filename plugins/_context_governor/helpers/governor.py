@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from plugins._context_governor.helpers.artifacts import get_artifact, put_artifact
+from plugins._context_governor.helpers.state import BROWSER_STATE_STORE
 
 
 @dataclass(frozen=True)
@@ -70,9 +71,30 @@ def browser_observation(
     artifact_ref: str = "",
 ) -> str:
     """Create a compact deterministic observation for the LLM context."""
-    parts = ["BROWSER_OBSERVATION", f"browser_id: {_clean_text(browser_id)}", f"url: {_clean_text(url)}", f"title: {_clean_text(title)}"]
+    browser_key = _clean_text(browser_id)
+    clean_url = _clean_text(url)
+    clean_title = _clean_text(title)
+    state = BROWSER_STATE_STORE.snapshot(
+        browser_id=browser_key,
+        url=clean_url,
+        title=clean_title,
+        content=str(document or ""),
+        artifact_ref=artifact_ref,
+    )
+    parts = [
+        "BROWSER_OBSERVATION",
+        f"session_id: {state.session_id}",
+        f"observation_id: {state.observation_id}",
+        f"browser_id: {browser_key}",
+        f"sequence: {state.sequence}",
+        f"changed: {str(state.changed).lower()}",
+        f"url: {clean_url}",
+        f"title: {clean_title}",
+    ]
     if action:
         parts.append(f"action: {_clean_text(action)}")
+    if state.diff and state.diff != "initial":
+        parts.extend(["state_diff:", state.diff])
     if artifact_ref:
         parts.append(f"artifact_ref: {artifact_ref}")
         parts.append("artifact: full page content is retrievable explicitly")
@@ -143,8 +165,6 @@ def govern_tool_result(tool_name: str, result: Any, config: GovernorConfig = DEF
     if tool_name.lower() not in {"browser", "web_browser"}:
         return str(result or "")
     if isinstance(result, str) and result.startswith("BROWSER_OBSERVATION\n"):
-        # Idempotent: Browser._format_result() has already governed this result.
-        # Re-compacting here could truncate the artifact reference or metadata.
         return result
     if isinstance(result, dict) and "document" in result:
         return format_browser_result("observation", result, config)
