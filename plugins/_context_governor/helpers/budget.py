@@ -57,16 +57,24 @@ class ContextBudgetGovernor:
             return text
 
         max_chars = max(int(limit * self.config.chars_per_token), 1)
-        marker = "\n...[context budget: truncated; artifact recoverable]...\n"
+        # Keep the marker deliberately compact so even small budgets retain an
+        # explicit truncation signal without exceeding the requested budget.
+        marker = "context budget: truncated"
         marker_chars = len(marker)
-        if max_chars <= marker_chars + 2:
-            return text[:max_chars]
+        if max_chars <= marker_chars:
+            return marker[:max_chars]
 
         payload_chars = max_chars - marker_chars
-        head = max(payload_chars * 2 // 3, 1)
-        tail = max(payload_chars - head, 1)
-        result = text[:head] + marker + text[-tail:]
+        head = max(payload_chars * 2 // 3, 0)
+        tail = max(payload_chars - head, 0)
+        if head and tail:
+            result = text[:head] + marker + text[-tail:]
+        elif head:
+            result = text[:head] + marker
+        else:
+            result = marker
 
+        # Keep the final estimate strictly within the requested budget.
         while self.approximate_tokens(result) > limit and result:
             result = result[:-1]
         return result
