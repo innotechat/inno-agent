@@ -1,0 +1,26 @@
+name: Browser State Governor
+
+on:
+  push:
+    branches: ["feat/browser-state-v1"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  test-browser-state-governor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install runtime and test dependencies
+        run: python -m pip install -r requirements.txt -r requirements.dev.txt
+      - name: Run Context Governor, Budget, and Browser State tests
+        run: python -m pytest plugins/_context_governor/tests/test_governor.py plugins/_context_governor/tests/test_browser_lifecycle.py plugins/_context_governor/tests/test_budget.py plugins/_context_governor/tests/test_budget_integration.py plugins/_context_governor/tests/test_browser_state.py -q
+      - name: Run token benchmarks
+        run: |
+          python scripts/benchmark_context_governor.py
+          python scripts/benchmark_browser_observations.py
