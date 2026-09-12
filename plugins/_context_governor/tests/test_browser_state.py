@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from plugins._context_governor.helpers.artifacts import ARTIFACT_STORE, put_artifact
-from plugins._context_governor.helpers.state import BROWSER_STATE_STORE
+from plugins._context_governor.helpers.state import BROWSER_STATE_STORE, BrowserStateStore
 from plugins._context_governor.helpers.governor import browser_observation
 from plugins._context_governor.tools.browser_artifact import BrowserArtifact
 from plugins._context_governor.tools.browser_state import BrowserState
@@ -16,6 +18,10 @@ def clear_state():
     yield
     BROWSER_STATE_STORE.clear()
     ARTIFACT_STORE.clear()
+
+
+def _observation_id(observation: str) -> str:
+    return next(line.split(": ", 1)[1] for line in observation.splitlines() if line.startswith("observation_id:"))
 
 
 def test_snapshot_has_stable_session_and_unique_observation_ids():
@@ -36,10 +42,48 @@ def test_state_diff_detects_added_and_removed_lines():
     assert "- [1] Old" in second
 
 
+def test_browser_ids_are_isolated():
+    first = browser_observation(1, "https://a.test", "A", "one")
+    second = browser_observation(2, "https://b.test", "B", "two")
+    assert "sequence: 1" in first
+    assert "sequence: 1" in second
+    assert "changed: true" in second
+    assert BROWSER_STATE_STORE.latest(1).session_id != BROWSER_STATE_STORE.latest(2).session_id
+
+
+def test_close_invalidates_latest_state():
+    observation = browser_observation(5, "https://example.test", "Home", "hello")
+    observation_id = _observation_id(observation)
+    BROWSER_STATE_STORE.close(5)
+    assert BROWSER_STATE_STORE.latest(5) is None
+    with pytest.raises(KeyError):
+        BROWSER_STATE_STORE.get(observation_id)
+
+
+def test_ttl_expires_observations(monkeypatch):
+    store = BrowserStateStore(ttl_seconds=1)
+    snapshot = store.snapshot(browser_id=9, url="u", title="t", content="c")
+    monkeypatch.setattr(time, "time", lambda: snapshot.created_at + 2)
+    assert store.latest(9) is None
+    with pytest.raises(KeyError):
+        store.get(snapshot.observation_id)
+
+
+def test_snapshot_eviction_removes_latest_only_when_evicted():
+    store = BrowserStateStore(max_snapshots=2)
+    first = store.snapshot(browser_id=1, url="u1", title="t", content="1")
+    second = store.snapshot(browser_id=2, url="u2", title="t", content="2")
+    third = store.snapshot(browser_id=3, url="u3", title="t", content="3")
+    with pytest.raises(KeyError):
+        store.get(first.observation_id)
+    assert store.latest(2) is second
+    assert store.latest(3) is third
+
+
 @pytest.mark.asyncio
 async def test_browser_state_tool_returns_latest_and_diff():
     observation = browser_observation(4, "https://example.test", "Home", "hello")
-    observation_id = next(line.split(": ", 1)[1] for line in observation.splitlines() if line.startswith("observation_id:"))
+    observation_id = _observation_id(observation)
     latest = await BrowserState().execute(browser_id="4")
     diff = await BrowserState().execute(observation_id=observation_id, mode="diff")
     assert "BROWSER_STATE" in latest.message
@@ -48,10 +92,11 @@ async def test_browser_state_tool_returns_latest_and_diff():
 
 
 @pytest.mark.asyncio
-async def test_browser_artifact_targeted_query():
-    ref = put_artifact("Title\nCreate post\nNotifications\nSearch")
-    result = await BrowserArtifact().execute(ref=ref, query="post")
-    assert result.message == "Create post"
+async def test_browser_artifact_targeted_query_returns_context():
+    ref = put_artifact("Title\nCreate post\nPost body\nNotifications\nSearch")
+    result = await BrowserArtifact().execute(ref=ref, query="post", context_lines=1)
+    assert "Create post" in result.message
+    assert "Post body" in result.message
 
 
 @pytest.mark.asyncio
