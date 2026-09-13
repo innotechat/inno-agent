@@ -99,7 +99,7 @@ class ActionIdempotencyStore:
 
     def __init__(self, max_entries: int = 512, ttl_seconds: float = 900.0):
         self.max_entries = max(1, int(max_entries))
-        self.ttl_seconds = max(1.0, float(ttl_seconds))
+        self.ttl_seconds = max(0.001, float(ttl_seconds))
         self._completed: dict[str, float] = {}
 
     def _purge(self) -> None:
