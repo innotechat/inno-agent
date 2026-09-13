@@ -24,3 +24,4 @@ jobs:
         run: |
           python scripts/benchmark_context_governor.py
           python scripts/benchmark_browser_observations.py
+          python scripts/benchmark_browser_state.py
