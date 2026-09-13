@@ -2,7 +2,7 @@ name: Browser State Governor
 
 on:
   push:
-    branches: ["feat/browser-state-v1"]
+    branches: ["feat/browser-action-safety-v1"]
   pull_request:
     branches: ["main"]
 
@@ -23,9 +23,10 @@ jobs:
           python -m compileall -q \
             plugins/_context_governor \
             plugins/_browser/extensions/python/system_prompt/_20_browser_context.py \
-            plugins/_browser/tools/browser.py
-      - name: Run Context Governor, Budget, and Browser State tests
-        run: python -m pytest plugins/_context_governor/tests/test_governor.py plugins/_context_governor/tests/test_browser_lifecycle.py plugins/_context_governor/tests/test_budget.py plugins/_context_governor/tests/test_budget_integration.py plugins/_context_governor/tests/test_browser_state.py -q
+            plugins/_browser/tools/browser.py \
+            helpers/tool.py
+      - name: Run Context Governor, Budget, Browser State, and Safety tests
+        run: python -m pytest plugins/_context_governor/tests/test_governor.py plugins/_context_governor/tests/test_browser_lifecycle.py plugins/_context_governor/tests/test_budget.py plugins/_context_governor/tests/test_budget_integration.py plugins/_context_governor/tests/test_browser_state.py plugins/_context_governor/tests/test_action_safety.py -q
       - name: Run token benchmarks
         run: |
           python scripts/benchmark_context_governor.py
