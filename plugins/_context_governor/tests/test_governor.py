@@ -110,6 +110,21 @@ def test_close_action_invalidates_requested_browser_state():
     assert BROWSER_STATE_STORE.latest(2) is None
 
 
+def test_close_action_reconciles_removed_browser_from_runtime_listing():
+    browser_observation(1, "https://one.test", "One", "one")
+    browser_observation(2, "https://two.test", "Two", "two")
+    result = format_browser_result(
+        "close",
+        {
+            "browsers": [{"id": 1, "currentUrl": "https://one.test", "title": "One"}],
+            "last_interacted_browser_id": 1,
+        },
+    )
+    assert "browsers" in result
+    assert BROWSER_STATE_STORE.latest(1) is not None
+    assert BROWSER_STATE_STORE.latest(2) is None
+
+
 def test_artifact_store_retrieves_and_expires_safely():
     store = ArtifactStore(ttl_seconds=1, max_artifacts=2, max_chars=100)
     ref = store.put("FULL DOCUMENT")
