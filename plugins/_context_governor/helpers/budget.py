@@ -57,8 +57,6 @@ class ContextBudgetGovernor:
             return text
 
         max_chars = max(int(limit * self.config.chars_per_token), 1)
-        # Keep the marker deliberately compact so even small budgets retain an
-        # explicit truncation signal without exceeding the requested budget.
         marker = "context budget: truncated"
         marker_chars = len(marker)
         if max_chars <= marker_chars:
@@ -74,7 +72,6 @@ class ContextBudgetGovernor:
         else:
             result = marker
 
-        # Keep the final estimate strictly within the requested budget.
         while self.approximate_tokens(result) > limit and result:
             result = result[:-1]
         return result
@@ -85,10 +82,14 @@ class ContextBudgetGovernor:
         if not raw.strip():
             return ""
 
-        # Preserve structured observation line boundaries while removing noisy spacing.
         value = "\n".join(re.sub(r"[ \t]+", " ", line).strip() for line in raw.splitlines()).strip()
         if not value:
             return ""
+
+        # Count the raw observation before deduplication so reduction metrics
+        # represent context that would otherwise have entered history.
+        self.metrics.raw_tokens += self.approximate_tokens(value)
+        self.metrics.observations += 1
 
         fingerprint = hashlib.sha256(value.encode("utf-8")).hexdigest()
         seen_key = f"{key}\0{fingerprint}" if key else fingerprint
@@ -97,9 +98,6 @@ class ContextBudgetGovernor:
             return ""
         if key:
             self._seen.add(seen_key)
-
-        self.metrics.raw_tokens += self.approximate_tokens(value)
-        self.metrics.observations += 1
 
         per_item = self.config.max_observation_tokens
         if priority in {"critical", "actionable"}:
