@@ -6,13 +6,23 @@ from agent import Agent, LoopData
 from helpers.extension import call_extensions_async
 from helpers.print_style import PrintStyle
 from helpers.strings import sanitize_string
+from plugins._context_governor.helpers.action_safety import (
+    ACTION_AUDIT_LOG,
+    ACTION_IDEMPOTENCY_STORE,
+    browser_action_fingerprint,
+    guard_browser_action,
+    is_high_impact_action,
+    verify_browser_action_result,
+)
+from plugins._context_governor.helpers.state import BROWSER_STATE_STORE
 
 
 @dataclass
 class Response:
-    message:str
+    message: str
     break_loop: bool
     additional: dict[str, Any] | None = None
+
 
 class Tool:
 
@@ -24,6 +34,9 @@ class Tool:
         self.loop_data = loop_data
         self.message = message
         self.progress: str = ""
+        self._action_safety_args: dict[str, Any] = {}
+        self._action_safety_decision = None
+        self._action_safety_fingerprint = ""
 
     @abstractmethod
     async def execute(self,**kwargs) -> Response:
@@ -39,7 +52,44 @@ class Tool:
             return
         self.progress += content
 
+    def _browser_safety_args(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        args: dict[str, Any] = dict(self.args) if isinstance(self.args, dict) else {}
+        args.update(kwargs or {})
+        args.setdefault("context_id", getattr(getattr(self.agent, "context", None), "id", ""))
+        if not args.get("action") and self.method:
+            args["action"] = self.method
+        return args
+
     async def before_execution(self, **kwargs):
+        if self.name.lower() in {"browser", "web_browser"}:
+            safety_args = self._browser_safety_args(kwargs)
+            decision = guard_browser_action(self.name, safety_args)
+            fingerprint = browser_action_fingerprint(safety_args)
+            self._action_safety_args = safety_args
+            self._action_safety_decision = decision
+            self._action_safety_fingerprint = fingerprint
+
+            observation_id = str(safety_args.get("observation_id") or "").strip()
+            browser_id = safety_args.get("browser_id")
+            if observation_id and browser_id is not None:
+                latest = BROWSER_STATE_STORE.latest(browser_id)
+                if latest is not None and latest.observation_id != observation_id:
+                    reason = "browser target is stale: supplied observation_id does not match the latest browser state"
+                    ACTION_AUDIT_LOG.record(decision=decision, fingerprint=fingerprint, status="blocked_stale_target", args=safety_args)
+                    raise ValueError(f"Browser action blocked: {reason}")
+
+            if is_high_impact_action(safety_args) and ACTION_IDEMPOTENCY_STORE.seen(fingerprint):
+                reason = "duplicate high-impact browser action blocked by idempotency guard"
+                ACTION_AUDIT_LOG.record(decision=decision, fingerprint=fingerprint, status="blocked_duplicate", args=safety_args)
+                raise ValueError(f"Browser action blocked: {reason}")
+
+            if is_high_impact_action(safety_args) and bool(safety_args.get("confirm")) and not observation_id:
+                reason = "high-impact confirmation must be bound to a reviewed observation_id"
+                ACTION_AUDIT_LOG.record(decision=decision, fingerprint=fingerprint, status="blocked_unbound_confirmation", args=safety_args)
+                raise ValueError(f"Browser action blocked: {reason}")
+
+            ACTION_AUDIT_LOG.record(decision=decision, fingerprint=fingerprint, status="allowed", args=safety_args)
+
         PrintStyle(font_color="#1B4F72", padding=True, background_color="white", bold=True).print(f"{self.agent.agent_name}: Using tool '{self.name}'")
         self.log = self.get_log_object()
         if self.args and isinstance(self.args, dict):
@@ -53,6 +103,32 @@ class Tool:
 
     async def after_execution(self, response: Response, **kwargs):
         text = sanitize_string(response.message.strip())
+        if self.name.lower() in {"browser", "web_browser"} and self._action_safety_decision is not None:
+            high_impact = is_high_impact_action(self._action_safety_args)
+            verified = verify_browser_action_result(text, require_success=high_impact)
+            if not verified:
+                ACTION_AUDIT_LOG.record(
+                    decision=self._action_safety_decision,
+                    fingerprint=self._action_safety_fingerprint,
+                    status="verification_failed",
+                    args=self._action_safety_args,
+                )
+            elif high_impact:
+                ACTION_IDEMPOTENCY_STORE.mark_completed(self._action_safety_fingerprint)
+                ACTION_AUDIT_LOG.record(
+                    decision=self._action_safety_decision,
+                    fingerprint=self._action_safety_fingerprint,
+                    status="verified_completed",
+                    args=self._action_safety_args,
+                )
+            else:
+                ACTION_AUDIT_LOG.record(
+                    decision=self._action_safety_decision,
+                    fingerprint=self._action_safety_fingerprint,
+                    status="verified_result",
+                    args=self._action_safety_args,
+                )
+
         self.agent.hist_add_tool_result(self.name, text, id=self.log.id, **(response.additional or {}))
         PrintStyle(font_color="#1B4F72", background_color="white", padding=True, bold=True).print(f"{self.agent.agent_name}: Response from tool '{self.name}'")
         PrintStyle(font_color="#85C1E9").print(text)

@@ -1,0 +1,36 @@
+name: Browser State Governor
+
+on:
+  push:
+    branches: ["feat/browser-action-safety-v1"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  test-browser-state-governor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR head / push commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install runtime and test dependencies
+        run: python -m pip install -r requirements.txt -r requirements.dev.txt
+      - name: Compile changed Python modules
+        run: |
+          python -m compileall -q \
+            plugins/_context_governor \
+            plugins/_browser/extensions/python/system_prompt/_20_browser_context.py \
+            plugins/_browser/tools/browser.py \
+            helpers/tool.py
+      - name: Run Context Governor, Budget, Browser State, and Safety tests
+        run: python -m pytest plugins/_context_governor/tests/test_governor.py plugins/_context_governor/tests/test_browser_lifecycle.py plugins/_context_governor/tests/test_budget.py plugins/_context_governor/tests/test_budget_integration.py plugins/_context_governor/tests/test_browser_state.py plugins/_context_governor/tests/test_action_safety.py plugins/_context_governor/tests/test_action_idempotency.py plugins/_context_governor/tests/test_action_safety_integration.py -q
+      - name: Run token benchmarks
+        run: |
+          python scripts/benchmark_context_governor.py
+          python scripts/benchmark_browser_observations.py
+          python scripts/benchmark_browser_state.py

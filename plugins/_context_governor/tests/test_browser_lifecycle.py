@@ -13,6 +13,7 @@ from plugins._context_governor.tools.browser_artifact import BrowserArtifact
 
 class _FakeLog:
     def __init__(self):
+        self.id = "test-log"
         self.updated = None
 
     def update(self, content: str):
@@ -23,12 +24,13 @@ class _FakeAgent:
     def __init__(self):
         self.agent_name = "test-agent"
         self.captured = None
-        self.context = type("Context", (), {"id": "test-context"})()
+        self.context = type("Context", (), {"id": "test-context", "type": None, "get_data": lambda self, key: None})()
+        self.config = type("Config", (), {"profile": None})()
 
     def hist_add_tool_result(self, tool_name: str, tool_result: str, **kwargs):
         data = {"tool_name": tool_name, "tool_result": tool_result, **kwargs}
         # Exercise the same extension hook used by Agent.hist_add_tool_result().
-        extension.call_extensions_sync("hist_add_tool_result", self, data=data)
+        extension.call_extensions_sync("hist_add_tool_result", agent=self, data=data)
         self.captured = data
 
 
