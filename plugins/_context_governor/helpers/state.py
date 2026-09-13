@@ -121,6 +121,11 @@ class BrowserStateStore:
         self._purge_expired()
         return self._latest.get(self._key(browser_id))
 
+    def browser_ids(self) -> tuple[str, ...]:
+        """Return currently tracked browser ids after TTL cleanup."""
+        self._purge_expired()
+        return tuple(self._latest.keys())
+
     def close(self, browser_id: object) -> None:
         """Invalidate every state snapshot for the closed browser session."""
         self._purge_expired()
