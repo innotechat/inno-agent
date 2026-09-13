@@ -5,6 +5,7 @@ from typing import Any
 
 from helpers.tool import Response, Tool
 from plugins._context_governor.helpers.artifacts import get_artifact
+from plugins._context_governor.helpers.budget import get_agent_governor
 
 
 class BrowserArtifact(Tool):
@@ -25,6 +26,12 @@ class BrowserArtifact(Tool):
             value = get_artifact(ref)
         except KeyError as exc:
             return Response(message=str(exc), break_loop=False)
+
+        if getattr(self, "agent", None) is not None:
+            governor = get_agent_governor(self.agent)
+            governor.note_artifact_retrieval()
+            if query or element_ref or start_line or end_line:
+                governor.note_escalation()
 
         lines = value.splitlines()
         query = str(query or "").strip()
