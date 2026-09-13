@@ -29,7 +29,7 @@ class _FakeAgent:
     def hist_add_tool_result(self, tool_name: str, tool_result: str, **kwargs):
         data = {"tool_name": tool_name, "tool_result": tool_result, **kwargs}
         # Exercise the same extension hook used by Agent.hist_add_tool_result().
-        extension.call_extensions_sync("hist_add_tool_result", agent=None, data=data)
+        extension.call_extensions_sync("hist_add_tool_result", agent=self, data=data)
         self.captured = data
 
 
