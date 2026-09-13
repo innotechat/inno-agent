@@ -4,6 +4,14 @@ This measures serialization size only. It is not a provider billing/token report
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# Keep direct ``python scripts/...`` execution working in CI and locally.
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from plugins._context_governor.helpers.artifacts import ARTIFACT_STORE
 from plugins._context_governor.helpers.state import BROWSER_STATE_STORE
 from plugins._context_governor.helpers.governor import browser_observation
