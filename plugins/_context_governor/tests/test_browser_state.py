@@ -109,6 +109,12 @@ def test_snapshot_eviction_removes_latest_only_when_evicted():
     assert store.latest(3) is third
 
 
+def test_cached_state_content_is_bounded():
+    store = BrowserStateStore(max_content_chars=1024)
+    snapshot = store.snapshot(browser_id=10, url="u", title="t", content="x" * 5000)
+    assert len(snapshot.content) == 1024
+
+
 @pytest.mark.asyncio
 async def test_browser_state_tool_returns_latest_and_diff():
     observation = browser_observation(4, "https://example.test", "Home", "hello")
