@@ -41,6 +41,22 @@ def compact_document(document: Any, config: GovernorConfig = DEFAULT_CONFIG) -> 
     return (text[:head] + marker + text[-tail:])[:limit]
 
 
+def compact_browser_metadata(browser_id: Any, url: Any, title: Any, config: GovernorConfig = DEFAULT_CONFIG) -> str:
+    """Serialize browser metadata without mutating the state store.
+
+    System-prompt refreshes can happen before every browser action. They must
+    not create synthetic observations or advance browser state sequences.
+    """
+    parts = [
+        "BROWSER_OBSERVATION",
+        f"browser_id: {_clean_text(browser_id)}",
+        f"url: {_clean_text(url)}",
+        f"title: {_clean_text(title)}",
+        "state_tracking: browser tool observations only",
+    ]
+    return compact_document("\n".join(parts), config)
+
+
 def _extract_interactive_lines(document: Any, config: GovernorConfig) -> tuple[list[str], str]:
     """Extract stable numbered browser refs while retaining surrounding readable text."""
     text = str(document or "")
@@ -67,27 +83,35 @@ def _compact_observation(parts: list[str], config: GovernorConfig) -> str:
     if len(text) <= limit:
         return text
 
-    # Identity and recovery metadata must never disappear merely because the
-    # page body is large. Keep the header intact and spend the remaining budget
-    # on the observation payload.
-    critical_prefix = parts[:]
-    payload_start = next((i for i, item in enumerate(critical_prefix) if item == "__PAYLOAD__"), None)
+    payload_start = next((i for i, item in enumerate(parts) if item == "__PAYLOAD__"), None)
     if payload_start is None:
         return compact_document(text, config)
 
-    header = "\n".join(critical_prefix[:payload_start])
-    payload = "\n".join(critical_prefix[payload_start + 1:])
+    header = "\n".join(parts[:payload_start])
+    payload = "\n".join(parts[payload_start + 1:])
     if len(header) >= limit:
-        # The header is intentionally small in normal operation. If a caller
-        # supplies pathological metadata, preserve the recovery reference and
-        # identity lines before applying the hard cap.
-        priority = [line for line in critical_prefix[:payload_start] if line.startswith(("BROWSER_OBSERVATION", "session_id:", "observation_id:", "browser_id:", "artifact_ref:"))]
+        priority = [
+            line for line in parts[:payload_start]
+            if line.startswith((
+                "BROWSER_OBSERVATION",
+                "session_id:",
+                "observation_id:",
+                "browser_id:",
+                "artifact_ref:",
+            ))
+        ]
         return "\n".join(priority)[:limit]
 
     remaining = limit - len(header) - 1
     if remaining <= 0:
         return header[:limit]
-    return header + "\n" + compact_document(payload, GovernorConfig(max_chars=remaining, max_visible_text_chars=config.max_visible_text_chars, max_interactive_elements=config.max_interactive_elements, retain_artifact=config.retain_artifact))
+    payload_config = GovernorConfig(
+        max_chars=remaining,
+        max_visible_text_chars=config.max_visible_text_chars,
+        max_interactive_elements=config.max_interactive_elements,
+        retain_artifact=config.retain_artifact,
+    )
+    return header + "\n" + compact_document(payload, payload_config)
 
 
 def browser_observation(
@@ -162,7 +186,27 @@ def _compact_document_fields(value: Any, config: GovernorConfig) -> Any:
     return value
 
 
-def format_browser_result(action: str, result: Any, config: GovernorConfig = DEFAULT_CONFIG) -> str:
+def _browser_id_from_result(result: Any) -> Any:
+    if not isinstance(result, dict):
+        return None
+    state = result.get("state") if isinstance(result.get("state"), dict) else {}
+    browsers = result.get("browsers") if isinstance(result.get("browsers"), list) else []
+    last_id = result.get("last_interacted_browser_id")
+    if last_id is not None:
+        return last_id
+    return result.get("browser_id") or result.get("id") or state.get("id") or next(
+        (browser.get("id") for browser in browsers if isinstance(browser, dict) and browser.get("id") is not None),
+        None,
+    )
+
+
+def format_browser_result(
+    action: str,
+    result: Any,
+    config: GovernorConfig = DEFAULT_CONFIG,
+    *,
+    browser_id: Any = None,
+) -> str:
     """Format browser output efficiently; full `content` remains explicit."""
     normalized_action = str(action or "").strip().lower()
     if normalized_action == "content":
@@ -173,20 +217,20 @@ def format_browser_result(action: str, result: Any, config: GovernorConfig = DEF
     if normalized_action in {"close", "close_all"}:
         if normalized_action == "close_all":
             BROWSER_STATE_STORE.clear()
-        elif isinstance(result, dict):
-            browser_id = result.get("browser_id") or result.get("id")
-            if browser_id is not None:
-                BROWSER_STATE_STORE.close(browser_id)
+        else:
+            resolved_browser_id = browser_id if browser_id is not None else _browser_id_from_result(result)
+            if resolved_browser_id is not None:
+                BROWSER_STATE_STORE.close(resolved_browser_id)
         return json.dumps(result, indent=2, ensure_ascii=False, default=str)
 
     if isinstance(result, dict) and "document" in result:
         document = str(result.get("document") or "")
         artifact_ref = put_artifact(document) if config.retain_artifact and document else ""
         metadata = {key: value for key, value in result.items() if key != "document"}
-        browser_id = result.get("browser_id") or result.get("id")
+        resolved_browser_id = result.get("browser_id") or result.get("id") or browser_id
         url = result.get("currentUrl") or result.get("url")
         title = result.get("title")
-        return browser_observation(browser_id, url, title, document, config, action=normalized_action, metadata=metadata, artifact_ref=artifact_ref)
+        return browser_observation(resolved_browser_id, url, title, document, config, action=normalized_action, metadata=metadata, artifact_ref=artifact_ref)
     compacted = _compact_document_fields(result, config)
     return json.dumps(compacted, indent=2, ensure_ascii=False, default=str)
 
