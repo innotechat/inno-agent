@@ -25,6 +25,7 @@ class _FakeAgent:
         self.agent_name = "test-agent"
         self.captured = None
         self.context = type("Context", (), {"id": "test-context"})()
+        self.config = type("Config", (), {"profile": None})()
 
     def hist_add_tool_result(self, tool_name: str, tool_result: str, **kwargs):
         data = {"tool_name": tool_name, "tool_result": tool_result, **kwargs}
