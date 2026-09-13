@@ -26,7 +26,7 @@ jobs:
             plugins/_browser/tools/browser.py \
             helpers/tool.py
       - name: Run Context Governor, Budget, Browser State, and Safety tests
-        run: python -m pytest plugins/_context_governor/tests/test_governor.py plugins/_context_governor/tests/test_browser_lifecycle.py plugins/_context_governor/tests/test_budget.py plugins/_context_governor/tests/test_budget_integration.py plugins/_context_governor/tests/test_browser_state.py plugins/_context_governor/tests/test_action_safety.py -q
+        run: python -m pytest plugins/_context_governor/tests/test_governor.py plugins/_context_governor/tests/test_browser_lifecycle.py plugins/_context_governor/tests/test_budget.py plugins/_context_governor/tests/test_budget_integration.py plugins/_context_governor/tests/test_browser_state.py plugins/_context_governor/tests/test_action_safety.py plugins/_context_governor/tests/test_action_idempotency.py -q
       - name: Run token benchmarks
         run: |
           python scripts/benchmark_context_governor.py
