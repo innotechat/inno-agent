@@ -25,8 +25,6 @@ def _observation_id(observation: str) -> str:
 
 
 def _tool(tool_type):
-    # execute() does not need an Agent, so bypass Tool.__init__ without inventing
-    # a fake runtime object or coupling this unit test to Agent internals.
     return object.__new__(tool_type)
 
 
@@ -114,6 +112,22 @@ async def test_browser_artifact_targeted_query_returns_context():
     result = await _tool(BrowserArtifact).execute(ref=ref, query="post", context_lines=1)
     assert "Create post" in result.message
     assert "Post body" in result.message
+
+
+@pytest.mark.asyncio
+async def test_browser_artifact_element_ref_returns_target_and_context():
+    ref = put_artifact("Header\n[12] Create post\nPost body\nFooter")
+    result = await _tool(BrowserArtifact).execute(ref=ref, element_ref="12", context_lines=1)
+    assert "[12] Create post" in result.message
+    assert "Post body" in result.message
+    assert "Footer" not in result.message
+
+
+@pytest.mark.asyncio
+async def test_browser_artifact_line_region_is_bounded():
+    ref = put_artifact("one\ntwo\nthree\nfour")
+    result = await _tool(BrowserArtifact).execute(ref=ref, start_line=2, end_line=3)
+    assert result.message == "two\nthree"
 
 
 @pytest.mark.asyncio
