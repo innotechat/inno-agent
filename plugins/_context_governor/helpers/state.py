@@ -84,18 +84,18 @@ class BrowserStateStore:
         observation_id = f"bobs_{secrets.token_urlsafe(10)}"
         diff = self._diff(previous.content, content) if previous else "initial"
         snapshot = BrowserSnapshot(
-            session_id,
-            observation_id,
-            key,
-            url,
-            title,
-            artifact_ref,
-            sequence,
-            changed,
-            diff,
-            time.time(),
-            current_fp,
-            content,
+            session_id=session_id,
+            observation_id=observation_id,
+            browser_id=key,
+            url=url,
+            title=title,
+            artifact_ref=artifact_ref,
+            sequence=sequence,
+            changed=changed,
+            diff=diff,
+            created_at=time.time(),
+            fingerprint=current_fp,
+            content=content,
         )
         self._latest[key] = snapshot
         self._snapshots[observation_id] = snapshot
@@ -120,13 +120,14 @@ class BrowserStateStore:
         return self._latest.get(self._key(browser_id))
 
     def close(self, browser_id: object) -> None:
-        """Invalidate browser state when its runtime session is closed."""
+        """Invalidate every state snapshot for the closed browser session."""
         self._purge_expired()
         key = self._key(browser_id)
-        snapshot = self._latest.pop(key, None)
+        self._latest.pop(key, None)
         self._sessions.pop(key, None)
-        if snapshot:
-            self._snapshots.pop(snapshot.observation_id, None)
+        stale_ids = [oid for oid, snapshot in self._snapshots.items() if snapshot.browser_id == key]
+        for observation_id in stale_ids:
+            self._snapshots.pop(observation_id, None)
 
     def clear(self) -> None:
         self._sessions.clear()
