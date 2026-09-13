@@ -37,7 +37,8 @@ def compact_document(document: Any, config: GovernorConfig = DEFAULT_CONFIG) -> 
         return text
     head = max(limit * 2 // 3, 1)
     tail = max(limit - head, 1)
-    return text[:head] + "\n...[context governor: document truncated; retrieve full content explicitly]...\n" + text[-tail:]
+    marker = "\n...[context governor: document truncated; retrieve full content explicitly]...\n"
+    return (text[:head] + marker + text[-tail:])[:limit]
 
 
 def _extract_interactive_lines(document: Any, config: GovernorConfig) -> tuple[list[str], str]:
@@ -57,6 +58,36 @@ def _extract_interactive_lines(document: Any, config: GovernorConfig) -> tuple[l
             continue
         visible_lines.append(line)
     return interactive, "\n".join(visible_lines)
+
+
+def _compact_observation(parts: list[str], config: GovernorConfig) -> str:
+    """Compact observation payload while preserving critical identity/recovery fields."""
+    limit = max(int(config.max_chars), 1)
+    text = "\n".join(parts)
+    if len(text) <= limit:
+        return text
+
+    # Identity and recovery metadata must never disappear merely because the
+    # page body is large. Keep the header intact and spend the remaining budget
+    # on the observation payload.
+    critical_prefix = parts[:]
+    payload_start = next((i for i, item in enumerate(critical_prefix) if item == "__PAYLOAD__"), None)
+    if payload_start is None:
+        return compact_document(text, config)
+
+    header = "\n".join(critical_prefix[:payload_start])
+    payload = "\n".join(critical_prefix[payload_start + 1:])
+    if len(header) >= limit:
+        # The header is intentionally small in normal operation. If a caller
+        # supplies pathological metadata, preserve the recovery reference and
+        # identity lines before applying the hard cap.
+        priority = [line for line in critical_prefix[:payload_start] if line.startswith(("BROWSER_OBSERVATION", "session_id:", "observation_id:", "browser_id:", "artifact_ref:"))]
+        return "\n".join(priority)[:limit]
+
+    remaining = limit - len(header) - 1
+    if remaining <= 0:
+        return header[:limit]
+    return header + "\n" + compact_document(payload, GovernorConfig(max_chars=remaining, max_visible_text_chars=config.max_visible_text_chars, max_interactive_elements=config.max_interactive_elements, retain_artifact=config.retain_artifact))
 
 
 def browser_observation(
@@ -91,17 +122,14 @@ def browser_observation(
         f"url: {clean_url}",
         f"title: {clean_title}",
     ]
+    if artifact_ref:
+        parts.append(f"artifact_ref: {artifact_ref}")
+        parts.append("artifact: full page content is retrievable explicitly")
     if action:
         parts.append(f"action: {_clean_text(action)}")
     if state.diff and state.diff != "initial" and state.changed:
         parts.extend(["state_diff:", state.diff])
-    if artifact_ref:
-        parts.append(f"artifact_ref: {artifact_ref}")
-        parts.append("artifact: full page content is retrievable explicitly")
 
-    # Do not repeat the same page body/refs on every browser result. The full
-    # artifact remains recoverable, while state metadata tells the agent that
-    # the page is unchanged and avoids unnecessary context growth.
     if not state.changed:
         parts.append("state: unchanged; use browser_artifact for targeted retrieval if needed")
     else:
@@ -115,13 +143,15 @@ def browser_observation(
                 if text:
                     parts.append(f"{key}: {text}")
         interactive, visible = _extract_interactive_lines(document, config)
+        payload = ["__PAYLOAD__"]
         if interactive:
-            parts.append("interactive_elements:")
-            parts.extend(interactive)
+            payload.append("interactive_elements:")
+            payload.extend(interactive)
         visible = visible[:max(int(config.max_visible_text_chars), 0)]
         if visible:
-            parts.extend(["visible_text:", visible])
-    return compact_document("\n".join(parts), config)
+            payload.extend(["visible_text:", visible])
+        parts.extend(payload)
+    return _compact_observation(parts, config)
 
 
 def _compact_document_fields(value: Any, config: GovernorConfig) -> Any:
