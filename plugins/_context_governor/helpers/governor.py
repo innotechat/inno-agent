@@ -20,11 +20,20 @@ class GovernorConfig:
 
 
 DEFAULT_CONFIG = GovernorConfig()
+_SENSITIVE_METADATA_PATTERN = re.compile(
+    r"(?:^|[_-])(password|passwd|secret|token|cookie|authorization|credential|api[_-]?key|access[_-]?key|refresh[_-]?token)(?:$|[_-])",
+    re.IGNORECASE,
+)
 
 
 def _clean_text(value: Any) -> str:
     text = str(value or "")
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _is_sensitive_metadata_key(key: Any) -> bool:
+    normalized = str(key or "").strip()
+    return bool(_SENSITIVE_METADATA_PATTERN.search(normalized))
 
 
 def compact_document(document: Any, config: GovernorConfig = DEFAULT_CONFIG) -> str:
@@ -42,11 +51,7 @@ def compact_document(document: Any, config: GovernorConfig = DEFAULT_CONFIG) -> 
 
 
 def compact_browser_metadata(browser_id: Any, url: Any, title: Any, config: GovernorConfig = DEFAULT_CONFIG) -> str:
-    """Serialize browser metadata without mutating the state store.
-
-    System-prompt refreshes can happen before every browser action. They must
-    not create synthetic observations or advance browser state sequences.
-    """
+    """Serialize browser metadata without mutating the state store."""
     parts = [
         "BROWSER_OBSERVATION",
         f"browser_id: {_clean_text(browser_id)}",
@@ -159,7 +164,7 @@ def browser_observation(
     else:
         if metadata:
             for key, value in metadata.items():
-                if key in {"document", "screenshot"}:
+                if key in {"document", "screenshot"} or _is_sensitive_metadata_key(key):
                     continue
                 if value is None or isinstance(value, (dict, list)):
                     continue
