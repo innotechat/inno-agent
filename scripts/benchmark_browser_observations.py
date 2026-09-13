@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
 
 from helpers.tokens import approximate_prompt_tokens
 from plugins._context_governor.helpers.governor import GovernorConfig, format_browser_result
+from plugins._context_governor.helpers.state import BROWSER_STATE_STORE
 
 
 def _dashboard() -> dict:
@@ -97,22 +98,29 @@ def _search_results() -> dict:
 
 def _measure(result: dict, config: GovernorConfig) -> dict:
     raw = json.dumps(result, ensure_ascii=False, default=str)
-    governed = format_browser_result("click", result, config)
+    first = format_browser_result("click", result, config)
+    second = format_browser_result("click", result, config)
     raw_tokens = approximate_prompt_tokens(raw)
-    governed_tokens = approximate_prompt_tokens(governed)
-    reduction = 0.0 if raw_tokens == 0 else (1 - governed_tokens / raw_tokens) * 100
+    first_tokens = approximate_prompt_tokens(first)
+    second_tokens = approximate_prompt_tokens(second)
+    reduction = 0.0 if raw_tokens == 0 else (1 - first_tokens / raw_tokens) * 100
+    repeated_reduction = 0.0 if first_tokens == 0 else (1 - second_tokens / first_tokens) * 100
     return {
         "raw_chars": len(raw),
-        "governed_chars": len(governed),
+        "governed_chars": len(first),
+        "repeated_governed_chars": len(second),
         "raw_tokens_approx": raw_tokens,
-        "governed_tokens_approx": governed_tokens,
+        "governed_tokens_approx": first_tokens,
+        "repeated_governed_tokens_approx": second_tokens,
         "token_reduction_percent": round(reduction, 2),
-        "artifact_preserved": "artifact_ref: browser://" in governed,
-        "observation": governed,
+        "repeated_context_reduction_percent": round(repeated_reduction, 2),
+        "artifact_preserved": "artifact_ref: browser://" in first,
+        "repeated_observation_compacted": "state: unchanged" in second,
     }
 
 
 def main() -> None:
+    BROWSER_STATE_STORE.clear()
     config = GovernorConfig(
         max_chars=12000,
         max_visible_text_chars=6000,
@@ -126,18 +134,20 @@ def main() -> None:
     measurements = {name: _measure(result, config) for name, result in scenarios.items()}
     total_raw = sum(item["raw_tokens_approx"] for item in measurements.values())
     total_governed = sum(item["governed_tokens_approx"] for item in measurements.values())
+    total_repeated = sum(item["repeated_governed_tokens_approx"] for item in measurements.values())
     overall = 0.0 if total_raw == 0 else (1 - total_governed / total_raw) * 100
+    repeated_overall = 0.0 if total_governed == 0 else (1 - total_repeated / total_governed) * 100
     report = {
         "type": "realistic_offline_browser_fixture",
         "note": "Representative fixtures, not live-site/provider billing measurements.",
-        "scenarios": {
-            name: {key: value for key, value in item.items() if key != "observation"}
-            for name, item in measurements.items()
-        },
+        "scenarios": measurements,
         "overall_raw_tokens_approx": total_raw,
         "overall_governed_tokens_approx": total_governed,
+        "overall_repeated_governed_tokens_approx": total_repeated,
         "overall_token_reduction_percent": round(overall, 2),
+        "overall_repeated_context_reduction_percent": round(repeated_overall, 2),
         "all_artifacts_preserved": all(item["artifact_preserved"] for item in measurements.values()),
+        "all_repeated_observations_compacted": all(item["repeated_observation_compacted"] for item in measurements.values()),
     }
     print(json.dumps(report, indent=2))
 
