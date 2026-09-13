@@ -72,6 +72,29 @@ def test_browser_result_preserves_metadata_and_structures_document():
     assert "artifact_ref: browser://" in result
 
 
+def test_browser_result_redacts_sensitive_metadata():
+    result = format_browser_result(
+        "click",
+        {
+            "document": "Dashboard",
+            "browser_id": 2,
+            "url": "https://example.test",
+            "success": True,
+            "password": "super-secret",
+            "access_token": "token-value",
+            "cookie": "session-cookie",
+            "api_key": "api-secret",
+            "authorization": "Bearer secret",
+        },
+    )
+    assert "super-secret" not in result
+    assert "token-value" not in result
+    assert "session-cookie" not in result
+    assert "api-secret" not in result
+    assert "Bearer secret" not in result
+    assert "success: True" in result
+
+
 def test_prompt_metadata_does_not_create_or_advance_browser_state():
     assert BROWSER_STATE_STORE.latest(99) is None
     result = compact_browser_metadata(99, "https://example.test", "Dashboard")
