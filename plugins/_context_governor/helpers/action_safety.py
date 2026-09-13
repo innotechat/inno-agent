@@ -102,6 +102,20 @@ def browser_action_fingerprint(args: dict[str, Any] | None) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
 
 
+def verify_browser_action_result(result: Any, *, require_success: bool = False) -> bool:
+    """Conservatively verify a browser result before recording completion."""
+    text = str(result or "").strip().lower()
+    if not text:
+        return False
+    if any(marker in text for marker in ("success: false", " failed:", "error:", "exception:", "blocked:")):
+        return False
+    if not require_success:
+        return True
+    # Browser observation formatting preserves scalar success metadata when the
+    # runtime provides it. Completion is recorded only when that signal is true.
+    return "success: true" in text or '"success": true' in text or "completed: true" in text
+
+
 class ActionIdempotencyStore:
     """Small TTL registry for completed high-impact browser actions; never stores credentials."""
 
