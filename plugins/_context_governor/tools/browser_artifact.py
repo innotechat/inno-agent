@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from helpers.tool import Response, Tool
@@ -7,23 +8,53 @@ from plugins._context_governor.helpers.artifacts import get_artifact
 
 
 class BrowserArtifact(Tool):
-    """Explicitly retrieve a retained browser artifact, optionally by text/ref query."""
+    """Explicitly retrieve a retained browser artifact without full-context injection."""
 
-    async def execute(self, ref: str = "", query: str = "", max_chars: int = 6000, context_lines: int = 1, **kwargs: Any) -> Response:
+    async def execute(
+        self,
+        ref: str = "",
+        query: str = "",
+        element_ref: str = "",
+        start_line: int = 0,
+        end_line: int = 0,
+        max_chars: int = 6000,
+        context_lines: int = 1,
+        **kwargs: Any,
+    ) -> Response:
         try:
             value = get_artifact(ref)
         except KeyError as exc:
             return Response(message=str(exc), break_loop=False)
+
+        lines = value.splitlines()
         query = str(query or "").strip()
-        if query:
+        element_ref = str(element_ref or "").strip()
+
+        if element_ref:
+            # Browser interactive refs are represented as lines such as
+            # "[12] Create post". Return that element plus nearby context.
+            match_pattern = re.compile(rf"^\s*(?:[-*]\s*)?\[{re.escape(element_ref.strip('[]'))}\]\s+.*$")
+            matched = [index for index, line in enumerate(lines) if match_pattern.match(line)]
+            if not matched:
+                return Response(message=f"No artifact element matched ref: {element_ref}", break_loop=False)
+            window = max(int(context_lines), 0)
+            selected: set[int] = set()
+            for index in matched:
+                selected.update(range(max(0, index - window), min(len(lines), index + window + 1)))
+            value = "\n".join(lines[index] for index in sorted(selected))
+        elif query:
             needle = query.casefold()
-            lines = value.splitlines()
             matched: set[int] = set()
+            window = max(int(context_lines), 0)
             for index, line in enumerate(lines):
                 if needle in line.casefold():
-                    window = max(int(context_lines), 0)
                     matched.update(range(max(0, index - window), min(len(lines), index + window + 1)))
             value = "\n".join(lines[index] for index in sorted(matched)) or f"No artifact lines matched query: {query}"
+        elif int(start_line) > 0 or int(end_line) > 0:
+            start = max(int(start_line) - 1, 0)
+            end = max(int(end_line), start + 1) if int(end_line) > 0 else len(lines)
+            value = "\n".join(lines[start:end])
+
         limit = max(int(max_chars), 1)
         if len(value) > limit:
             value = value[:limit] + "\n...[targeted artifact result truncated]"
