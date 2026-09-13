@@ -29,10 +29,13 @@ class BrowserArtifact(Tool):
         lines = value.splitlines()
         query = str(query or "").strip()
         element_ref = str(element_ref or "").strip()
+        start = int(start_line)
+        end = int(end_line)
+
+        if start < 0 or end < 0 or (start and end and end < start):
+            return Response(message="Invalid artifact line range", break_loop=False)
 
         if element_ref:
-            # Browser interactive refs are represented as lines such as
-            # "[12] Create post". Return that element plus nearby context.
             match_pattern = re.compile(rf"^\s*(?:[-*]\s*)?\[{re.escape(element_ref.strip('[]'))}\]\s+.*$")
             matched = [index for index, line in enumerate(lines) if match_pattern.match(line)]
             if not matched:
@@ -50,12 +53,16 @@ class BrowserArtifact(Tool):
                 if needle in line.casefold():
                     matched.update(range(max(0, index - window), min(len(lines), index + window + 1)))
             value = "\n".join(lines[index] for index in sorted(matched)) or f"No artifact lines matched query: {query}"
-        elif int(start_line) > 0 or int(end_line) > 0:
-            start = max(int(start_line) - 1, 0)
-            end = max(int(end_line), start + 1) if int(end_line) > 0 else len(lines)
-            value = "\n".join(lines[start:end])
+        elif start or end:
+            line_start = max(start - 1, 0)
+            line_end = end if end > 0 else len(lines)
+            value = "\n".join(lines[line_start:line_end])
 
         limit = max(int(max_chars), 1)
         if len(value) > limit:
-            value = value[:limit] + "\n...[targeted artifact result truncated]"
+            marker = "\n...[targeted artifact result truncated]"
+            if len(marker) >= limit:
+                value = value[:limit]
+            else:
+                value = value[: limit - len(marker)] + marker
         return Response(message=value, break_loop=False)
