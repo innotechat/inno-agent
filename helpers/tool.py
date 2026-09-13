@@ -10,9 +10,9 @@ from plugins._context_governor.helpers.action_safety import (
     ACTION_AUDIT_LOG,
     ACTION_IDEMPOTENCY_STORE,
     browser_action_fingerprint,
-    decide_browser_action,
     guard_browser_action,
     is_high_impact_action,
+    verify_browser_action_result,
 )
 from plugins._context_governor.helpers.state import BROWSER_STATE_STORE
 
@@ -69,8 +69,6 @@ class Tool:
             self._action_safety_decision = decision
             self._action_safety_fingerprint = fingerprint
 
-            # A supplied observation id binds an edit/high-impact action to the
-            # page state the agent actually reviewed. Never silently accept stale state.
             observation_id = str(safety_args.get("observation_id") or "").strip()
             browser_id = safety_args.get("browser_id")
             if observation_id and browser_id is not None:
@@ -80,11 +78,14 @@ class Tool:
                     ACTION_AUDIT_LOG.record(decision=decision, fingerprint=fingerprint, status="blocked_stale_target", args=safety_args)
                     raise ValueError(f"Browser action blocked: {reason}")
 
-            # Confirmation is deliberately one-shot: it authorizes this exact
-            # action identity, while completed high-impact actions cannot repeat.
             if is_high_impact_action(safety_args) and ACTION_IDEMPOTENCY_STORE.seen(fingerprint):
                 reason = "duplicate high-impact browser action blocked by idempotency guard"
                 ACTION_AUDIT_LOG.record(decision=decision, fingerprint=fingerprint, status="blocked_duplicate", args=safety_args)
+                raise ValueError(f"Browser action blocked: {reason}")
+
+            if is_high_impact_action(safety_args) and bool(safety_args.get("confirm")) and not observation_id:
+                reason = "high-impact confirmation must be bound to a reviewed observation_id"
+                ACTION_AUDIT_LOG.record(decision=decision, fingerprint=fingerprint, status="blocked_unbound_confirmation", args=safety_args)
                 raise ValueError(f"Browser action blocked: {reason}")
 
             ACTION_AUDIT_LOG.record(decision=decision, fingerprint=fingerprint, status="allowed", args=safety_args)
@@ -103,20 +104,28 @@ class Tool:
     async def after_execution(self, response: Response, **kwargs):
         text = sanitize_string(response.message.strip())
         if self.name.lower() in {"browser", "web_browser"} and self._action_safety_decision is not None:
-            failed = any(marker in text.lower() for marker in (" failed:", "error:", "exception:", "blocked:", "success: false"))
-            if failed:
+            high_impact = is_high_impact_action(self._action_safety_args)
+            verified = verify_browser_action_result(text, require_success=high_impact)
+            if not verified:
                 ACTION_AUDIT_LOG.record(
                     decision=self._action_safety_decision,
                     fingerprint=self._action_safety_fingerprint,
-                    status="failed",
+                    status="verification_failed",
                     args=self._action_safety_args,
                 )
-            elif is_high_impact_action(self._action_safety_args):
+            elif high_impact:
                 ACTION_IDEMPOTENCY_STORE.mark_completed(self._action_safety_fingerprint)
                 ACTION_AUDIT_LOG.record(
                     decision=self._action_safety_decision,
                     fingerprint=self._action_safety_fingerprint,
-                    status="completed",
+                    status="verified_completed",
+                    args=self._action_safety_args,
+                )
+            else:
+                ACTION_AUDIT_LOG.record(
+                    decision=self._action_safety_decision,
+                    fingerprint=self._action_safety_fingerprint,
+                    status="verified_result",
                     args=self._action_safety_args,
                 )
 
