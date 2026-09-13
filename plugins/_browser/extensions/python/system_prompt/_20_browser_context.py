@@ -5,7 +5,7 @@ from typing import Any
 from agent import LoopData
 from helpers.extension import Extension
 from plugins._browser.helpers.runtime import get_runtime
-from plugins._context_governor.helpers.governor import browser_observation
+from plugins._context_governor.helpers.governor import compact_browser_metadata
 
 
 class BrowserContextPrompt(Extension):
@@ -42,13 +42,13 @@ class BrowserContextPrompt(Extension):
         if last_id:
             try:
                 state = await runtime.call("state", last_id)
-                # Do not inject the full DOM/document into every system prompt.
-                # The browser tool remains the explicit retrieval path.
+                # Prompt refreshes describe the live browser but do not create a
+                # synthetic observation or advance the state sequence.
                 section.extend(
                     [
                         "",
                         "last interacted web browser",
-                        browser_observation(
+                        compact_browser_metadata(
                             state.get("id"),
                             state.get("currentUrl", ""),
                             state.get("title", ""),
