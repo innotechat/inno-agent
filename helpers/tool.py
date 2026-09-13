@@ -6,6 +6,7 @@ from agent import Agent, LoopData
 from helpers.extension import call_extensions_async
 from helpers.print_style import PrintStyle
 from helpers.strings import sanitize_string
+from plugins._context_governor.helpers.action_safety import guard_browser_action
 
 
 @dataclass
@@ -40,6 +41,8 @@ class Tool:
         self.progress += content
 
     async def before_execution(self, **kwargs):
+        if self.name.lower() in {"browser", "web_browser"}:
+            guard_browser_action(self.name, kwargs or self.args)
         PrintStyle(font_color="#1B4F72", padding=True, background_color="white", bold=True).print(f"{self.agent.agent_name}: Using tool '{self.name}'")
         self.log = self.get_log_object()
         if self.args and isinstance(self.args, dict):
