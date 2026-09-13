@@ -24,6 +24,12 @@ def _observation_id(observation: str) -> str:
     return next(line.split(": ", 1)[1] for line in observation.splitlines() if line.startswith("observation_id:"))
 
 
+def _tool(tool_type):
+    # execute() does not need an Agent, so bypass Tool.__init__ without inventing
+    # a fake runtime object or coupling this unit test to Agent internals.
+    return object.__new__(tool_type)
+
+
 def test_snapshot_has_stable_session_and_unique_observation_ids():
     first = browser_observation(7, "https://example.test", "Home", "[12] Create\nWelcome")
     second = browser_observation(7, "https://example.test", "Home", "[12] Create\nWelcome")
@@ -95,8 +101,8 @@ def test_snapshot_eviction_removes_latest_only_when_evicted():
 async def test_browser_state_tool_returns_latest_and_diff():
     observation = browser_observation(4, "https://example.test", "Home", "hello")
     observation_id = _observation_id(observation)
-    latest = await BrowserState().execute(browser_id="4")
-    diff = await BrowserState().execute(observation_id=observation_id, mode="diff")
+    latest = await _tool(BrowserState).execute(browser_id="4")
+    diff = await _tool(BrowserState).execute(observation_id=observation_id, mode="diff")
     assert "BROWSER_STATE" in latest.message
     assert "BROWSER_STATE_DIFF" in diff.message
     assert observation_id in diff.message
@@ -105,12 +111,18 @@ async def test_browser_state_tool_returns_latest_and_diff():
 @pytest.mark.asyncio
 async def test_browser_artifact_targeted_query_returns_context():
     ref = put_artifact("Title\nCreate post\nPost body\nNotifications\nSearch")
-    result = await BrowserArtifact().execute(ref=ref, query="post", context_lines=1)
+    result = await _tool(BrowserArtifact).execute(ref=ref, query="post", context_lines=1)
     assert "Create post" in result.message
     assert "Post body" in result.message
 
 
 @pytest.mark.asyncio
 async def test_browser_artifact_unknown_ref_is_safe():
-    result = await BrowserArtifact().execute(ref="browser://missing")
+    result = await _tool(BrowserArtifact).execute(ref="browser://missing")
     assert "unknown or expired" in result.message
+
+
+def test_artifact_ref_survives_observation_budget():
+    document = "\n".join(f"[1{i}] element {i}" for i in range(1, 1000))
+    observation = browser_observation(8, "https://example.test", "Large", document)
+    assert "artifact_ref: browser://" in observation
