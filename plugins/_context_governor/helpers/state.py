@@ -25,9 +25,10 @@ class BrowserSnapshot:
 class BrowserStateStore:
     """Bounded process-local browser state index with TTL and safe session lifecycle."""
 
-    def __init__(self, *, max_snapshots: int = 256, ttl_seconds: int = 900):
+    def __init__(self, *, max_snapshots: int = 256, ttl_seconds: int = 900, max_content_chars: int = 65536):
         self.max_snapshots = max(int(max_snapshots), 1)
         self.ttl_seconds = max(int(ttl_seconds), 1)
+        self.max_content_chars = max(int(max_content_chars), 1024)
         self._sessions: dict[str, str] = {}
         self._latest: dict[str, BrowserSnapshot] = {}
         self._snapshots: dict[str, BrowserSnapshot] = {}
@@ -46,8 +47,8 @@ class BrowserStateStore:
         new = current.splitlines()
         old_set = set(old)
         new_set = set(new)
-        removed = [line for line in old if line not in new_set][:20]
-        added = [line for line in new if line not in old_set][:20]
+        removed = [line[:500] for line in old if line not in new_set][:20]
+        added = [line[:500] for line in new if line not in old_set][:20]
         parts = []
         if added:
             parts.append("added:\n" + "\n".join(f"+ {line}" for line in added))
@@ -82,7 +83,8 @@ class BrowserStateStore:
         changed = previous is None or current_fp != previous.fingerprint
         sequence = previous.sequence + 1 if previous else 1
         observation_id = f"bobs_{secrets.token_urlsafe(10)}"
-        diff = self._diff(previous.content, content) if previous else "initial"
+        bounded_content = str(content or "")[: self.max_content_chars]
+        diff = self._diff(previous.content, bounded_content) if previous else "initial"
         snapshot = BrowserSnapshot(
             session_id=session_id,
             observation_id=observation_id,
@@ -95,7 +97,7 @@ class BrowserStateStore:
             diff=diff,
             created_at=time.time(),
             fingerprint=current_fp,
-            content=content,
+            content=bounded_content,
         )
         self._latest[key] = snapshot
         self._snapshots[observation_id] = snapshot
