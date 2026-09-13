@@ -24,6 +24,10 @@ IRREVERSIBLE_KEYWORDS = {
     "publish", "post", "send", "delete", "remove", "purchase", "buy", "checkout", "pay", "transfer",
     "submit", "confirm", "grant", "revoke",
 }
+SENSITIVE_KEYS = {
+    "password", "secret", "token", "cookie", "authorization", "credential", "api_key", "apikey",
+    "access_token", "refresh_token", "session", "csrf", "private_key",
+}
 
 
 @dataclass(frozen=True)
@@ -62,6 +66,10 @@ def _is_external_http_url(url: str) -> bool:
         return False
 
 
+def is_high_impact_action(args: dict[str, Any] | None) -> bool:
+    return _looks_high_impact(args or {})
+
+
 def decide_browser_action(args: dict[str, Any] | None) -> ActionDecision:
     args = args or {}
     action = _normalized_action(args.get("action"))
@@ -95,7 +103,7 @@ def browser_action_fingerprint(args: dict[str, Any] | None) -> str:
 
 
 class ActionIdempotencyStore:
-    """Small TTL registry for completed browser actions; never stores credentials."""
+    """Small TTL registry for completed high-impact browser actions; never stores credentials."""
 
     def __init__(self, max_entries: int = 512, ttl_seconds: float = 900.0):
         self.max_entries = max(1, int(max_entries))
@@ -125,6 +133,55 @@ class ActionIdempotencyStore:
 
 
 ACTION_IDEMPOTENCY_STORE = ActionIdempotencyStore()
+
+
+class ActionAuditLog:
+    """Bounded in-process audit trail containing action metadata but no secret values."""
+
+    def __init__(self, max_entries: int = 1024):
+        self.max_entries = max(1, int(max_entries))
+        self._entries: list[dict[str, Any]] = []
+
+    @staticmethod
+    def _safe_value(key: str, value: Any) -> Any:
+        normalized = str(key).lower().replace("-", "_")
+        if any(secret in normalized for secret in SENSITIVE_KEYS):
+            return "[REDACTED]"
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            text = str(value)
+            return text[:500] if isinstance(value, str) else value
+        if isinstance(value, list):
+            return [ActionAuditLog._safe_value(key, item) for item in value[:20]]
+        return "[OMITTED]"
+
+    def record(self, *, decision: ActionDecision, fingerprint: str, status: str, args: dict[str, Any] | None = None) -> None:
+        args = args or {}
+        safe_args = {
+            key: self._safe_value(key, value)
+            for key, value in args.items()
+            if key not in {"confirm"} and key.lower() not in SENSITIVE_KEYS
+        }
+        self._entries.append({
+            "timestamp": time.time(),
+            "action": _normalized_action(args.get("action")),
+            "risk": decision.risk,
+            "allowed": decision.allowed,
+            "status": status,
+            "reason": decision.reason,
+            "fingerprint": fingerprint,
+            "args": safe_args,
+        })
+        if len(self._entries) > self.max_entries:
+            del self._entries[:-self.max_entries]
+
+    def entries(self) -> list[dict[str, Any]]:
+        return list(self._entries)
+
+    def clear(self) -> None:
+        self._entries.clear()
+
+
+ACTION_AUDIT_LOG = ActionAuditLog()
 
 
 def guard_browser_action(tool_name: str, args: dict[str, Any] | None) -> ActionDecision:
