@@ -31,6 +31,18 @@ def test_duplicate_observation_is_suppressed():
     assert governor.metrics.duplicates_suppressed == 1
 
 
+def test_duplicate_observation_still_counts_raw_context():
+    governor = ContextBudgetGovernor(ContextBudgetConfig(max_turn_tokens=100))
+    text = "same observation"
+    governor.govern(text, key="browser-1")
+    raw_after_first = governor.metrics.raw_tokens
+    governor.govern(text, key="browser-1")
+    assert governor.metrics.observations == 2
+    assert governor.metrics.raw_tokens == raw_after_first * 2
+    assert governor.metrics.governed_tokens == raw_after_first
+    assert governor.metrics.reduction_percent > 0
+
+
 def test_actionable_priority_gets_larger_budget():
     governor = ContextBudgetGovernor(ContextBudgetConfig(max_observation_tokens=5, max_tool_result_tokens=12, max_turn_tokens=30))
     normal = governor.govern("x" * 40, priority="normal", key="normal")
