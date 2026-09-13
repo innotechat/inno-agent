@@ -44,10 +44,15 @@ def compact_document(document: Any, config: GovernorConfig = DEFAULT_CONFIG) -> 
     limit = max(int(config.max_chars), 1)
     if len(text) <= limit:
         return text
-    head = max(limit * 2 // 3, 1)
-    tail = max(limit - head, 1)
-    marker = "\n...[context governor: document truncated; retrieve full content explicitly]...\n"
-    return (text[:head] + marker + text[-tail:])[:limit]
+    marker = "\n...[context governor: document truncated]...\n"
+    if len(marker) >= limit:
+        return marker[:limit]
+    available = limit - len(marker)
+    head = (available + 1) // 2
+    tail = available - head
+    if tail:
+        return text[:head] + marker + text[-tail:]
+    return text[:head] + marker
 
 
 def compact_browser_metadata(browser_id: Any, url: Any, title: Any, config: GovernorConfig = DEFAULT_CONFIG) -> str:
@@ -134,11 +139,17 @@ def browser_observation(
     browser_key = _clean_text(browser_id)
     clean_url = _clean_text(url)
     clean_title = _clean_text(title)
+    document_text = str(document or "")
+    if config.retain_artifact and document_text and not artifact_ref:
+        try:
+            artifact_ref = put_artifact(document_text)
+        except (ValueError, TypeError):
+            artifact_ref = ""
     state = BROWSER_STATE_STORE.snapshot(
         browser_id=browser_key,
         url=clean_url,
         title=clean_title,
-        content=str(document or ""),
+        content=document_text,
         artifact_ref=artifact_ref,
     )
     parts = [
@@ -171,7 +182,7 @@ def browser_observation(
                 text = _clean_text(value)
                 if text:
                     parts.append(f"{key}: {text}")
-        interactive, visible = _extract_interactive_lines(document, config)
+        interactive, visible = _extract_interactive_lines(document_text, config)
         payload = ["__PAYLOAD__"]
         if interactive:
             payload.append("interactive_elements:")
