@@ -1,0 +1,31 @@
+name: Context Governor
+
+on:
+  push:
+    branches: ["feat/context-governor-v6"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  test-context-governor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install runtime and test dependencies
+        run: python -m pip install -r requirements.txt -r requirements.dev.txt
+
+      - name: Run Context Governor tests
+        run: python -m pytest plugins/_context_governor/tests/test_governor.py plugins/_context_governor/tests/test_browser_lifecycle.py -q
+
+      - name: Run synthetic token benchmark
+        run: python scripts/benchmark_context_governor.py
+
+      - name: Run realistic browser observation benchmark
+        run: python scripts/benchmark_browser_observations.py
