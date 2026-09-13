@@ -95,6 +95,22 @@ def test_browser_result_redacts_sensitive_metadata():
     assert "success: True" in result
 
 
+def test_oversized_artifact_does_not_fail_browser_result(monkeypatch):
+    import plugins._context_governor.helpers.governor as governor_module
+
+    def fail_put_artifact(_value):
+        raise ValueError("artifact exceeds configured size limit")
+
+    monkeypatch.setattr(governor_module, "put_artifact", fail_put_artifact)
+    result = format_browser_result(
+        "click",
+        {"document": "Dashboard\n[12] Create post", "browser_id": 2, "success": True},
+    )
+    assert result.startswith("BROWSER_OBSERVATION\n")
+    assert "artifact_status: unavailable" in result
+    assert "[12] Create post" in result
+
+
 def test_prompt_metadata_does_not_create_or_advance_browser_state():
     assert BROWSER_STATE_STORE.latest(99) is None
     result = compact_browser_metadata(99, "https://example.test", "Dashboard")
