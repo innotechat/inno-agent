@@ -191,20 +191,6 @@ def _compact_document_fields(value: Any, config: GovernorConfig) -> Any:
     return value
 
 
-def _browser_id_from_result(result: Any) -> Any:
-    if not isinstance(result, dict):
-        return None
-    state = result.get("state") if isinstance(result.get("state"), dict) else {}
-    browsers = result.get("browsers") if isinstance(result.get("browsers"), list) else []
-    last_id = result.get("last_interacted_browser_id")
-    if last_id is not None:
-        return last_id
-    return result.get("browser_id") or result.get("id") or state.get("id") or next(
-        (browser.get("id") for browser in browsers if isinstance(browser, dict) and browser.get("id") is not None),
-        None,
-    )
-
-
 def _closed_browser_ids_from_result(result: Any) -> tuple[str, ...]:
     """Infer browser ids removed by a close result when the tool does not pass the requested id."""
     if not isinstance(result, dict):
@@ -248,8 +234,16 @@ def format_browser_result(
 
     if isinstance(result, dict) and "document" in result:
         document = str(result.get("document") or "")
-        artifact_ref = put_artifact(document) if config.retain_artifact and document else ""
+        artifact_ref = ""
+        artifact_error = ""
+        if config.retain_artifact and document:
+            try:
+                artifact_ref = put_artifact(document)
+            except (ValueError, TypeError) as exc:
+                artifact_error = str(exc)
         metadata = {key: value for key, value in result.items() if key != "document"}
+        if artifact_error:
+            metadata["artifact_status"] = "unavailable: configured artifact size limit exceeded"
         resolved_browser_id = result.get("browser_id") or result.get("id") or browser_id
         url = result.get("currentUrl") or result.get("url")
         title = result.get("title")
