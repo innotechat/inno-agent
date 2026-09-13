@@ -205,6 +205,21 @@ def _browser_id_from_result(result: Any) -> Any:
     )
 
 
+def _closed_browser_ids_from_result(result: Any) -> tuple[str, ...]:
+    """Infer browser ids removed by a close result when the tool does not pass the requested id."""
+    if not isinstance(result, dict):
+        return ()
+    browsers = result.get("browsers")
+    if not isinstance(browsers, list):
+        return ()
+    remaining = {
+        str(browser.get("id"))
+        for browser in browsers
+        if isinstance(browser, dict) and browser.get("id") is not None
+    }
+    return tuple(browser_id for browser_id in BROWSER_STATE_STORE.browser_ids() if browser_id not in remaining)
+
+
 def format_browser_result(
     action: str,
     result: Any,
@@ -223,9 +238,12 @@ def format_browser_result(
         if normalized_action == "close_all":
             BROWSER_STATE_STORE.clear()
         else:
-            resolved_browser_id = browser_id if browser_id is not None else _browser_id_from_result(result)
+            resolved_browser_id = browser_id
             if resolved_browser_id is not None:
                 BROWSER_STATE_STORE.close(resolved_browser_id)
+            else:
+                for closed_id in _closed_browser_ids_from_result(result):
+                    BROWSER_STATE_STORE.close(closed_id)
         return json.dumps(result, indent=2, ensure_ascii=False, default=str)
 
     if isinstance(result, dict) and "document" in result:
