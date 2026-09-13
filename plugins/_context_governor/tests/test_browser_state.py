@@ -66,13 +66,27 @@ def test_browser_ids_are_isolated():
     assert BROWSER_STATE_STORE.latest(1).session_id != BROWSER_STATE_STORE.latest(2).session_id
 
 
-def test_close_invalidates_latest_state():
-    observation = browser_observation(5, "https://example.test", "Home", "hello")
-    observation_id = _observation_id(observation)
+def test_close_invalidates_all_observations_for_session():
+    first = browser_observation(5, "https://example.test", "Home", "hello")
+    second = browser_observation(5, "https://example.test/next", "Next", "world")
+    first_id = _observation_id(first)
+    second_id = _observation_id(second)
     BROWSER_STATE_STORE.close(5)
     assert BROWSER_STATE_STORE.latest(5) is None
     with pytest.raises(KeyError):
-        BROWSER_STATE_STORE.get(observation_id)
+        BROWSER_STATE_STORE.get(first_id)
+    with pytest.raises(KeyError):
+        BROWSER_STATE_STORE.get(second_id)
+
+
+def test_reopening_browser_id_starts_new_session():
+    first = browser_observation(6, "https://example.test", "Home", "hello")
+    first_session = BROWSER_STATE_STORE.latest(6).session_id
+    BROWSER_STATE_STORE.close(6)
+    second = browser_observation(6, "https://example.test", "Home", "hello")
+    assert first_session != BROWSER_STATE_STORE.latest(6).session_id
+    assert "changed: true" in second
+    assert "sequence: 1" in second
 
 
 def test_ttl_expires_observations(monkeypatch):
