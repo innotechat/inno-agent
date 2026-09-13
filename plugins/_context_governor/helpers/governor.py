@@ -93,27 +93,34 @@ def browser_observation(
     ]
     if action:
         parts.append(f"action: {_clean_text(action)}")
-    if state.diff and state.diff != "initial":
+    if state.diff and state.diff != "initial" and state.changed:
         parts.extend(["state_diff:", state.diff])
     if artifact_ref:
         parts.append(f"artifact_ref: {artifact_ref}")
         parts.append("artifact: full page content is retrievable explicitly")
-    if metadata:
-        for key, value in metadata.items():
-            if key in {"document", "screenshot"}:
-                continue
-            if value is None or isinstance(value, (dict, list)):
-                continue
-            text = _clean_text(value)
-            if text:
-                parts.append(f"{key}: {text}")
-    interactive, visible = _extract_interactive_lines(document, config)
-    if interactive:
-        parts.append("interactive_elements:")
-        parts.extend(interactive)
-    visible = visible[:max(int(config.max_visible_text_chars), 0)]
-    if visible:
-        parts.extend(["visible_text:", visible])
+
+    # Do not repeat the same page body/refs on every browser result. The full
+    # artifact remains recoverable, while state metadata tells the agent that
+    # the page is unchanged and avoids unnecessary context growth.
+    if not state.changed:
+        parts.append("state: unchanged; use browser_artifact for targeted retrieval if needed")
+    else:
+        if metadata:
+            for key, value in metadata.items():
+                if key in {"document", "screenshot"}:
+                    continue
+                if value is None or isinstance(value, (dict, list)):
+                    continue
+                text = _clean_text(value)
+                if text:
+                    parts.append(f"{key}: {text}")
+        interactive, visible = _extract_interactive_lines(document, config)
+        if interactive:
+            parts.append("interactive_elements:")
+            parts.extend(interactive)
+        visible = visible[:max(int(config.max_visible_text_chars), 0)]
+        if visible:
+            parts.extend(["visible_text:", visible])
     return compact_document("\n".join(parts), config)
 
 
@@ -132,6 +139,16 @@ def format_browser_result(action: str, result: Any, config: GovernorConfig = DEF
         if isinstance(result, dict) and set(result.keys()) == {"document"}:
             return str(result.get("document") or "")
         return json.dumps(result, indent=2, ensure_ascii=False, default=str)
+
+    if normalized_action in {"close", "close_all"}:
+        if normalized_action == "close_all":
+            BROWSER_STATE_STORE.clear()
+        elif isinstance(result, dict):
+            browser_id = result.get("browser_id") or result.get("id")
+            if browser_id is not None:
+                BROWSER_STATE_STORE.close(browser_id)
+        return json.dumps(result, indent=2, ensure_ascii=False, default=str)
+
     if isinstance(result, dict) and "document" in result:
         document = str(result.get("document") or "")
         artifact_ref = put_artifact(document) if config.retain_artifact and document else ""
