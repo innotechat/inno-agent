@@ -1,0 +1,26 @@
+name: Social Automation Core
+
+on:
+  push:
+    branches: ["feat/social-automation-core-v1"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  test-social-automation-core:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR head / push commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install runtime and test dependencies
+        run: python -m pip install -r requirements.txt -r requirements.dev.txt
+      - name: Compile social automation core
+        run: python -m compileall -q plugins/_social_automation
+      - name: Run social automation tests
+        run: python -m pytest plugins/_social_automation/tests/test_core.py -q
