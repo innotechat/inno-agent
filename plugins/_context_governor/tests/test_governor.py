@@ -2,10 +2,12 @@ from plugins._context_governor.helpers.artifacts import ArtifactStore
 from plugins._context_governor.helpers.governor import (
     GovernorConfig,
     browser_observation,
+    compact_browser_metadata,
     compact_document,
     format_browser_result,
     govern_tool_result,
 )
+from plugins._context_governor.helpers.state import BROWSER_STATE_STORE
 
 
 def test_small_document_is_unchanged():
@@ -68,6 +70,21 @@ def test_browser_result_preserves_metadata_and_structures_document():
     assert "[12] Create post" in result
     assert "success: True" in result
     assert "artifact_ref: browser://" in result
+
+
+def test_prompt_metadata_does_not_create_or_advance_browser_state():
+    assert BROWSER_STATE_STORE.latest(99) is None
+    result = compact_browser_metadata(99, "https://example.test", "Dashboard")
+    assert "browser_id: 99" in result
+    assert "state_tracking: browser tool observations only" in result
+    assert BROWSER_STATE_STORE.latest(99) is None
+
+
+def test_close_action_invalidates_requested_browser_state():
+    browser_observation(2, "https://example.test", "Dashboard", "hello")
+    result = format_browser_result("close", {"success": True}, browser_id=2)
+    assert '"success": true' in result
+    assert BROWSER_STATE_STORE.latest(2) is None
 
 
 def test_artifact_store_retrieves_and_expires_safely():
