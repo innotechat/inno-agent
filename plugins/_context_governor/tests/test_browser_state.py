@@ -145,6 +145,20 @@ async def test_browser_artifact_line_region_is_bounded():
 
 
 @pytest.mark.asyncio
+async def test_browser_artifact_rejects_invalid_line_range():
+    ref = put_artifact("one\ntwo\nthree")
+    result = await _tool(BrowserArtifact).execute(ref=ref, start_line=3, end_line=2)
+    assert result.message == "Invalid artifact line range"
+
+
+@pytest.mark.asyncio
+async def test_browser_artifact_enforces_hard_max_chars():
+    ref = put_artifact("x" * 500)
+    result = await _tool(BrowserArtifact).execute(ref=ref, max_chars=40)
+    assert len(result.message) <= 40
+
+
+@pytest.mark.asyncio
 async def test_browser_artifact_unknown_ref_is_safe():
     result = await _tool(BrowserArtifact).execute(ref="browser://missing")
     assert "unknown or expired" in result.message
