@@ -5,13 +5,15 @@ from uuid import uuid4
 
 from .adapters import PublishResult, SocialPlatformAdapter
 from .models import ApprovalState, SocialAccount, SocialAction, SocialActionType, SocialDraft, SocialPlatform
+from .policy import ExecutionPolicy
 
 
 class SocialAutomationCore:
-    """Orchestrates draft/approval/publish without knowing platform-specific UI."""
+    """Orchestrates social workflows without knowing platform-specific UI."""
 
-    def __init__(self, adapters: dict[SocialPlatform, SocialPlatformAdapter] | None = None):
+    def __init__(self, adapters: dict[SocialPlatform, SocialPlatformAdapter] | None = None, policy: ExecutionPolicy | None = None):
         self._adapters = adapters or {}
+        self.policy = policy or ExecutionPolicy()
         self._drafts: dict[str, SocialDraft] = {}
         self._published_keys: set[str] = set()
 
@@ -24,14 +26,11 @@ class SocialAutomationCore:
         except KeyError as exc:
             raise ValueError(f"No social adapter registered for {platform.value}") from exc
 
-    def create_draft(
-        self,
-        account: SocialAccount,
-        text: str,
-        *,
-        media_refs: tuple[str, ...] = (),
-        metadata: dict | None = None,
-    ) -> SocialDraft:
+    def capabilities(self, account: SocialAccount) -> frozenset[str]:
+        """Discover capabilities without exposing platform DOM to the LLM."""
+        return self.adapter_for(account.platform).capabilities(account)
+
+    def create_draft(self, account: SocialAccount, text: str, *, media_refs: tuple[str, ...] = (), metadata: dict | None = None) -> SocialDraft:
         text = text.strip()
         if not text:
             raise ValueError("Social draft text cannot be empty")
@@ -43,6 +42,9 @@ class SocialAutomationCore:
             media_refs=media_refs,
             metadata=metadata or {},
         )
+        valid, reason = self.policy.validate_draft(draft)
+        if not valid:
+            raise ValueError(f"Draft policy validation failed: {reason}")
         valid, reason = self.adapter_for(account.platform).validate_draft(account, draft)
         if not valid:
             raise ValueError(f"Draft validation failed: {reason}")
@@ -79,8 +81,9 @@ class SocialAutomationCore:
         if action.draft is None:
             raise ValueError("Publish action requires a draft")
         draft = self._get_draft(action.draft.draft_id)
-        if draft.state != ApprovalState.APPROVED:
-            raise ValueError("Publishing requires explicit approval")
+        allowed, reason = self.policy.can_execute(action, draft)
+        if not allowed:
+            raise ValueError(reason)
         key = action.idempotency_key or draft.draft_id
         if key in self._published_keys:
             raise ValueError("Duplicate publish blocked by idempotency key")
