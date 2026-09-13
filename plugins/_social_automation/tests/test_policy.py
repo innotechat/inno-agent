@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 from plugins._social_automation.models import ApprovalState, SocialAction, SocialActionType, SocialAccount, SocialDraft, SocialPlatform
 from plugins._social_automation.policy import ExecutionPolicy, compact_execution_context
 
@@ -16,7 +14,8 @@ def draft(state=ApprovalState.DRAFT, text="hello"):
 
 def test_publish_requires_approval():
     policy = ExecutionPolicy()
-    ok, reason = policy.can_execute(SocialAction("a", SocialActionType.PUBLISH, account(), draft()), draft())
+    action = SocialAction("a", SocialActionType.PUBLISH, account(), draft())
+    ok, reason = policy.can_execute(action, draft())
     assert not ok
     assert "approval" in reason
 
@@ -37,7 +36,14 @@ def test_draft_length_is_bounded():
     assert "limit" in reason
 
 
-def test_compact_context_contains_no_content_or_credentials():
+def test_empty_draft_is_invalid():
+    policy = ExecutionPolicy()
+    ok, reason = policy.validate_draft(draft(text="   "))
+    assert not ok
+    assert "empty" in reason
+
+
+def test_compact_context_contains_only_execution_identity():
     context = compact_execution_context(
         platform="linkedin", account_id="acct-1", draft_id="draft-1",
         state="pending_approval", action="publish", target_id="post-box",
@@ -47,9 +53,3 @@ def test_compact_context_contains_no_content_or_credentials():
         "state": "pending_approval", "action": "publish", "target_id": "post-box",
     }
     assert "password" not in str(context).lower()
-
-
-def test_empty_draft_rejected():
-    policy = ExecutionPolicy()
-    with pytest.raises(ValueError):
-        policy.validate_draft(draft(text="   ")) if False else (_ for _ in ()).throw(ValueError("empty"))
