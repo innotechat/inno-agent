@@ -5,6 +5,7 @@ import time
 import pytest
 
 from plugins._context_governor.helpers.artifacts import ARTIFACT_STORE, put_artifact
+from plugins._context_governor.helpers.budget import get_agent_governor
 from plugins._context_governor.helpers.state import BROWSER_STATE_STORE, BrowserStateStore
 from plugins._context_governor.helpers.governor import browser_observation
 from plugins._context_governor.tools.browser_artifact import BrowserArtifact
@@ -162,6 +163,22 @@ async def test_browser_artifact_enforces_hard_max_chars():
     ref = put_artifact("x" * 500)
     result = await _tool(BrowserArtifact).execute(ref=ref, max_chars=40)
     assert len(result.message) <= 40
+
+
+@pytest.mark.asyncio
+async def test_browser_artifact_records_retrieval_metrics():
+    class FakeAgent:
+        pass
+
+    agent = FakeAgent()
+    tool = _tool(BrowserArtifact)
+    tool.agent = agent
+    ref = put_artifact("Title\n[12] Create post\nPost body")
+    result = await tool.execute(ref=ref, element_ref="12", context_lines=1)
+    metrics = get_agent_governor(agent).metrics
+    assert "[12] Create post" in result.message
+    assert metrics.artifact_retrievals == 1
+    assert metrics.escalations == 1
 
 
 @pytest.mark.asyncio
