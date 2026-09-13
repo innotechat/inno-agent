@@ -34,6 +34,17 @@ def test_snapshot_has_stable_session_and_unique_observation_ids():
     assert first != second
 
 
+def test_unchanged_page_does_not_repeat_large_visible_context():
+    document = "[12] Create post\n" + "important page text " * 500
+    first = browser_observation(7, "https://example.test", "Home", document)
+    second = browser_observation(7, "https://example.test", "Home", document)
+    assert "visible_text:" in first
+    assert "important page text" not in second
+    assert "interactive_elements:" not in second
+    assert "state: unchanged" in second
+    assert len(second) < len(first) / 3
+
+
 def test_state_diff_detects_added_and_removed_lines():
     browser_observation(3, "https://example.test", "A", "[1] Old\nhello")
     second = browser_observation(3, "https://example.test", "B", "[2] New\nhello")
